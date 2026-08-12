@@ -29,8 +29,10 @@ use std::{
 /// - Prompt the user for next command
 
 fn main() {
+    let mut user_inputs: Vec<String> = vec![];
     loop {
-        print!("> ");
+        let current_path = env::current_dir().unwrap();
+        print!("{} $ ", current_path.to_str().unwrap());
         // Rust doesn't write '> ' to the terminal immediately
         // because Rust keeps the stdout prints in buffer for efficiency
         // To trigger a flush, either there should be a newline (use println!)
@@ -39,6 +41,7 @@ fn main() {
 
         let mut user_input = String::new();
         stdin().read_line(&mut user_input).unwrap();
+        user_inputs.push(user_input.clone());
 
         let mut pipeline_stages = user_input.split(" | ").map(|x| x.trim()).peekable();
         let mut previous_stdout: Option<ChildStdout> = None;
@@ -129,51 +132,5 @@ fn main() {
         if pipeline_failed {
             continue;
         }
-
-        // Logic for single command execution
-        /*
-            let mut fragments_iterator = user_input.trim().split_whitespace();
-            let command = fragments_iterator.next().unwrap();
-            let arguments = fragments_iterator; // iterator of &str
-
-            match command {
-                // Shell built-ins
-                "cd" => {
-                    // .peek() adds an extra reference
-                    // arguments is already an iterator of &str
-                    // .peek() converts it to an iterator of &&str
-                    // that is why we dereference it using .map_or(|x| *x)
-                    // so that new_dir becomes &str again
-                    let new_dir = arguments.peekable().peek().map_or("/", |x| *x);
-                    let root = Path::new(new_dir);
-                    if let Err(e) = env::set_current_dir(root) {
-                        println!("{}", e);
-                    }
-                }
-                // Exit the shell program
-                "exit" => return,
-                _ => {
-                    // Creates a command configuration
-                    // adds arguments to it
-                    // asks the OS to create (spawn) and start the child process
-                    // .spawn() returns the Child handle as soon as the process starts execution
-                    // (and not after it has executed)
-                    let child_process = Command::new(command).args(arguments).spawn();
-                    match child_process {
-                        Ok(mut c) => {
-                            // Synchronous Blocking Wait
-                            // Make the parent process (the shell program)
-                            // wait synchronously for the child process to complete
-                            let _ = c.wait();
-                        }
-                        Err(e) => {
-                            // eprintln prints to the stderr (file descriptor 2)
-                            // println prints to the stdout (file descriptor 1)
-                            eprintln!("Failed: {}", e);
-                        }
-                    }
-                }
-            }
-        */
     }
 }
