@@ -110,9 +110,9 @@ stateDiagram-v2
 
 ### TODOs
 
-- [ ] Enable raw mode at start of each prompt read
-- [ ] Disable raw mode before `execute`
-- [ ] Restore cooked on `exit`
+- [x] Enable raw mode at start of each prompt read
+- [x] Disable raw mode before `execute`
+- [x] Restore cooked on `exit`
 - [ ] Restore cooked on panic/error unwind (scope guard or equivalent)
 
 ---
@@ -169,7 +169,7 @@ mode         // Draft | History(usize)   // or history_ptr: Option<usize>
 ### TODOs
 
 - [ ] Define state fields (`input_line`, `draft_line`, `history_ptr` / mode)
-- [ ] Reset state at start of each prompt
+- [x] Reset state at start of each prompt
 - [ ] Document: `history_ptr = None` after Enter / on new prompt
 
 ---
@@ -199,9 +199,9 @@ loop {
 
 ### TODOs
 
-- [ ] Replace `read_line` with raw key event loop (e.g. crossterm)
+- [x] Replace `read_line` with raw key event loop (e.g. crossterm)
 - [ ] Match only: Up, Down, Char(printable), Backspace, Enter
-- [ ] Default arm: no-op
+- [x] Default arm: no-op
 
 ---
 
@@ -287,7 +287,7 @@ redraw
 ### TODOs
 
 - [ ] Accept `KeyCode::Char(c)` when `c.is_printable()` (or equivalent)
-- [ ] Append + redraw
+- [x] Append + redraw
 
 ---
 
@@ -308,8 +308,8 @@ redraw
 
 ### TODOs
 
-- [ ] Implement Backspace with empty guard
-- [ ] Redraw (never move cursor into prompt)
+- [x] Implement Backspace with empty guard
+- [x] Redraw (never move cursor into prompt)
 
 ---
 
@@ -339,11 +339,11 @@ Empty line: no push; re-prompt.
 
 ### TODOs
 
-- [ ] Wire Enter to leave key loop
-- [ ] Cooked before execute
+- [x] Wire Enter to leave key loop
+- [x] Cooked before execute
 - [ ] Call `push_history` with E-HIST rules
-- [ ] Reuse existing execute/pipeline path
-- [ ] Ensure next prompt resets Draft state
+- [x] Reuse existing execute/pipeline path
+- [x] Ensure next prompt resets Draft state
 
 ---
 
@@ -365,8 +365,8 @@ Empty line: no push; re-prompt.
 
 ### TODOs
 
-- [ ] Implement `redraw(prompt, input_line)`
-- [ ] Clear remnants when new line is shorter than old
+- [x] Implement `redraw(prompt, input_line)`
+- [x] Clear remnants when new line is shorter than old
 - [ ] Call redraw from Char / Backspace / Up / Down
 
 ---
