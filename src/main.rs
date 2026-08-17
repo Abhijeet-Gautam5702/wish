@@ -1,6 +1,6 @@
 use crossterm::{
     cursor,
-    event::{Event, KeyCode, read},
+    event::{Event, KeyCode, KeyEvent, read},
     execute,
     terminal::{self, Clear},
 };
@@ -14,12 +14,31 @@ use std::{
 
 const MAX_HISTORY_ITEMS: usize = 10;
 
+/// Whether the line editor is on a fresh draft or browsing history.
 #[derive(PartialEq, Eq)]
 enum ShellMode {
+    /// Viewing / editing a line loaded from history.
     History,
+    /// Typing a new line (or restored draft after Down past newest).
     Draft,
 }
 
+/// RAII guard: raw mode while this value is alive; cooked again on drop.
+struct TerminalRawMode;
+impl TerminalRawMode {
+    /// Enable terminal raw mode and return a guard that disables it when dropped.
+    fn enter() -> Result<Self, io::Error> {
+        terminal::enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+impl Drop for TerminalRawMode {
+    fn drop(&mut self) {
+        let _ = terminal::disable_raw_mode();
+    }
+}
+
+/// Repaint the current prompt line as `prompt` + `input_line` (cursor at end).
 fn redraw(prompt: &str, input_line: &str) -> Result<(), io::Error> {
     let mut stdout = stdout();
     execute!(
@@ -32,6 +51,8 @@ fn redraw(prompt: &str, input_line: &str) -> Result<(), io::Error> {
     Ok(())
 }
 
+/// Run a line: builtins (`cd`, `exit`) or an external pipeline (`cmd | cmd | ...`).
+/// Returns `Ok(true)` if the shell should exit, `Ok(false)` to keep prompting.
 fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
     let mut pipeline_stages = command_string.split(" | ").map(|x| x.trim()).peekable();
     let mut previous_stdout: Option<ChildStdout> = None;
@@ -122,8 +143,8 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
     Ok(false)
 }
 
-/// pushes the user command input to the history of commands
-/// and pops off the oldest entry if MAX_HISTORY_ITEMS is reached
+/// Push a submitted command into history.
+/// Skips if it matches the last entry; drops the oldest when at MAX capacity.
 fn history_push(history: &mut Vec<String>, input_line: &String) {
     let curr_history_len = history.len();
     // skip if last entry is same as new entry
@@ -143,7 +164,7 @@ fn run_shell() -> Result<(), io::Error> {
     let mut history: Vec<String> = vec![];
     // Outer Shell Running Loop
     loop {
-        terminal::enable_raw_mode()?;
+        let _raw_mode = TerminalRawMode::enter()?;
 
         let current_path = env::current_dir().unwrap();
         let prompt = format!("{} $ ", current_path.to_str().unwrap());
@@ -158,99 +179,108 @@ fn run_shell() -> Result<(), io::Error> {
 
         // Key-parsing loop (Reads keystrokes)
         loop {
-            let event = read()?;
-            if event == Event::Key(KeyCode::Backspace.into()) {
-                input_line.pop();
-                redraw(&prompt, &input_line)?;
-            } else if event == Event::Key(KeyCode::Enter.into()) {
-                // Move to the col-0 of next line to display command execution results
-                // "\r" -> move to col-0 of this line
-                // "\n" -> move to next line
-                write!(stdout(), "\r\n")?;
-
-                // No command input found
-                // move to next command prompt
-                if input_line.trim().is_empty() {
-                    break;
+            match read()? {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Backspace,
+                    ..
+                }) => {
+                    input_line.pop();
+                    redraw(&prompt, &input_line)?;
                 }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    ..
+                }) => {
+                    // Move to the col-0 of next line to display command execution results
+                    // "\r" -> move to col-0 of this line
+                    // "\n" -> move to next line
+                    write!(stdout(), "\r\n")?;
 
-                // Bring the terminal into the cooked mode before executing the command
-                terminal::disable_raw_mode()?;
-                // update command history
-                history_push(&mut history, &input_line);
-                let should_exit = execute_command(&mut input_line)?;
-                if should_exit {
+                    // No command input found
+                    // move to next command prompt
+                    if input_line.trim().is_empty() {
+                        break;
+                    }
+
+                    // Bring the terminal into the cooked mode before executing the command
+                    drop(_raw_mode);
+                    // update command history
+                    history_push(&mut history, &input_line);
+                    let should_exit = execute_command(&mut input_line)?;
+                    if should_exit {
+                        return Ok(());
+                    }
+                    break; // break out from the key-parsing loop (to go to the next command prompt)
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Up, ..
+                }) => {
+                    if history.len() == 0 {
+                        continue;
+                    }
+                    // No-op: Oldest history entry reached
+                    if history_ptr_pos == 0 {
+                        continue;
+                    }
+                    // Enter the History Mode
+                    if shell_mode == ShellMode::Draft {
+                        draft_line = input_line.clone();
+                        shell_mode = ShellMode::History;
+                    }
+                    // Move up the history
+                    input_line = history[history_ptr_pos - 1].clone();
+                    history_ptr_pos -= 1;
+                    redraw(&prompt, &input_line)?;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Down,
+                    ..
+                }) => {
+                    if history.len() == 0 {
+                        continue;
+                    }
+                    // No-op: Already in draft mode
+                    if shell_mode == ShellMode::Draft {
+                        continue;
+                    }
+                    // newest history entry reached => move to draft_line
+                    else if history_ptr_pos == history.len() - 1 {
+                        input_line = draft_line.clone();
+                        draft_line = String::from("");
+                        history_ptr_pos += 1;
+                        shell_mode = ShellMode::Draft;
+                    }
+                    // Move down the history
+                    else if history_ptr_pos < history.len() - 1 {
+                        input_line = history[history_ptr_pos + 1].clone();
+                        history_ptr_pos += 1;
+                    }
+                    redraw(&prompt, &input_line)?;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Esc, ..
+                }) => {
+                    // Exit the shell
                     return Ok(());
                 }
-                break; // break out from the key-parsing loop (to go to the next command prompt)
-            } else if event == Event::Key(KeyCode::Up.into()) {
-                if history.len() == 0 {
-                    continue;
-                }
-                // No-op: Oldest history entry reached
-                if history_ptr_pos == 0 {
-                    continue;
-                }
-                // Enter the History Mode
-                if shell_mode == ShellMode::Draft {
-                    draft_line = input_line.clone();
-                    shell_mode = ShellMode::History;
-                }
-                // Move up the history
-                input_line = history[history_ptr_pos - 1].clone();
-                history_ptr_pos -= 1;
-                redraw(&prompt, &input_line)?;
-            } else if event == Event::Key(KeyCode::Down.into()) {
-                if history.len() == 0 {
-                    continue;
-                }
-                // No-op: Already in draft mode
-                if shell_mode == ShellMode::Draft {
-                    continue;
-                }
-                // newest history entry reached => move to draft_line
-                else if history_ptr_pos == history.len() - 1 {
-                    input_line = draft_line.clone();
-                    draft_line = String::from("");
-                    history_ptr_pos += 1;
-                    shell_mode = ShellMode::Draft;
-                }
-                // Move down the history
-                else if history_ptr_pos < history.len() - 1 {
-                    input_line = history[history_ptr_pos + 1].clone();
-                    history_ptr_pos += 1;
-                }
-                redraw(&prompt, &input_line)?;
-            } else if event == Event::Key(KeyCode::Esc.into()) {
-                // Exit the shell
-                return Ok(());
-            } else {
-                // TODO: PRINTABLE CHARACTER CHECK
-                if let Event::Key(key_event) = event {
-                    if let KeyCode::Char(c) = key_event.code {
+                // Check if the keystroke is a printable character
+                // append to input_line if it is
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char(c),
+                    ..
+                }) => {
+                    if !c.is_control() {
                         input_line.push(c);
                         redraw(&prompt, &input_line)?;
                     }
                 }
-                // Check if the keystroke is a printable character
-                // append to input_line if it is
+                // Mouse events, Other keys, etc.
+                _ => { /* do nothing */ }
             }
         }
-
-        terminal::disable_raw_mode()?;
-    }
-}
-
-fn cleanup() {
-    if terminal::is_raw_mode_enabled().unwrap() {
-        terminal::disable_raw_mode().unwrap();
     }
 }
 
 fn main() {
-    match run_shell() {
-        Ok(_) => {}
-        Err(_) => {}
-    }
-    cleanup();
+    run_shell().unwrap();
 }

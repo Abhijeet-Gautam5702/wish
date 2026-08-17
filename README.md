@@ -200,7 +200,7 @@ loop {
 ### TODOs
 
 - [x] Replace `read_line` with raw key event loop (e.g. crossterm)
-- [ ] Match only: Up, Down, Char(printable), Backspace, Enter
+- [x] Match only: Up, Down, Char(printable), Backspace, Enter
 - [x] Default arm: no-op
 
 ---
@@ -286,7 +286,7 @@ redraw
 
 ### TODOs
 
-- [ ] Accept `KeyCode::Char(c)` when `c.is_printable()` (or equivalent)
+- [x] Accept `KeyCode::Char(c)` when `c.is_printable()` (or equivalent)
 - [x] Append + redraw
 
 ---
