@@ -138,9 +138,9 @@ stateDiagram-v2
 
 ### TODOs
 
-- [ ] Add `history: Vec<String>` and `const MAX_HISTORY`
-- [ ] `push_history(line)` with empty / duplicate / MAX rules
-- [ ] Never mutate history inside key handlers except Enter path
+- [x] Add `history: Vec<String>` and `const MAX_HISTORY`
+- [x] `push_history(line)` with empty / duplicate / MAX rules
+- [x] Never mutate history inside key handlers except Enter path
 
 ---
 
@@ -168,9 +168,9 @@ mode         // Draft | History(usize)   // or history_ptr: Option<usize>
 
 ### TODOs
 
-- [ ] Define state fields (`input_line`, `draft_line`, `history_ptr` / mode)
+- [x] Define state fields (`input_line`, `draft_line`, `history_ptr` / mode)
 - [x] Reset state at start of each prompt
-- [ ] Document: `history_ptr = None` after Enter / on new prompt
+- [x] Document: `history_ptr = None` after Enter / on new prompt
 
 ---
 
@@ -233,9 +233,9 @@ redraw
 
 ### TODOs
 
-- [ ] Implement Up handler per rules above
-- [ ] Snapshot `draft_line` only when leaving Draft
-- [ ] Redraw after successful state change (and optionally on no-op)
+- [x] Implement Up handler per rules above
+- [x] Snapshot `draft_line` only when leaving Draft
+- [x] Redraw after successful state change (and optionally on no-op)
 
 ---
 
@@ -264,9 +264,9 @@ redraw
 
 ### TODOs
 
-- [ ] Implement Down handler per rules above
-- [ ] Restore draft when leaving newest downward
-- [ ] Redraw after change
+- [x] Implement Down handler per rules above
+- [x] Restore draft when leaving newest downward
+- [x] Redraw after change
 
 ---
 
@@ -341,7 +341,7 @@ Empty line: no push; re-prompt.
 
 - [x] Wire Enter to leave key loop
 - [x] Cooked before execute
-- [ ] Call `push_history` with E-HIST rules
+- [x] Call `push_history` with E-HIST rules
 - [x] Reuse existing execute/pipeline path
 - [x] Ensure next prompt resets Draft state
 
@@ -367,7 +367,7 @@ Empty line: no push; re-prompt.
 
 - [x] Implement `redraw(prompt, input_line)`
 - [x] Clear remnants when new line is shorter than old
-- [ ] Call redraw from Char / Backspace / Up / Down
+- [x] Call redraw from Char / Backspace / Up / Down
 
 ---
 

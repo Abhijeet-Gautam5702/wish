@@ -1,17 +1,24 @@
 use crossterm::{
     cursor,
-    event::{Event, KeyCode, KeyEvent, read},
+    event::{Event, KeyCode, read},
     execute,
     terminal::{self, Clear},
 };
 use std::{
     env, eprintln, format,
-    io::{self, Error, Write, stdin, stdout},
+    io::{self, Error, Write, stdout},
     path::Path,
-    print, println,
     process::{Child, ChildStdout, Command, Stdio},
     write,
 };
+
+const MAX_HISTORY_ITEMS: usize = 10;
+
+#[derive(PartialEq, Eq)]
+enum ShellMode {
+    History,
+    Draft,
+}
 
 fn redraw(prompt: &str, input_line: &str) -> Result<(), io::Error> {
     let mut stdout = stdout();
@@ -115,8 +122,25 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
     Ok(false)
 }
 
+/// pushes the user command input to the history of commands
+/// and pops off the oldest entry if MAX_HISTORY_ITEMS is reached
+fn history_push(history: &mut Vec<String>, input_line: &String) {
+    let curr_history_len = history.len();
+    // skip if last entry is same as new entry
+    if curr_history_len >= 1 {
+        let last = history.last().unwrap();
+        if last == input_line {
+            return;
+        }
+    }
+    if curr_history_len == MAX_HISTORY_ITEMS {
+        history.remove(0);
+    }
+    history.push(input_line.clone());
+}
+
 fn run_shell() -> Result<(), io::Error> {
-    let mut user_inputs: Vec<String> = vec![];
+    let mut history: Vec<String> = vec![];
     // Outer Shell Running Loop
     loop {
         terminal::enable_raw_mode()?;
@@ -126,6 +150,9 @@ fn run_shell() -> Result<(), io::Error> {
 
         let mut input_line: String = String::from("");
         let mut draft_line: String = String::from("");
+        let mut history_ptr_pos: usize = history.len();
+
+        let mut shell_mode: ShellMode = ShellMode::Draft;
 
         redraw(&prompt, &input_line)?;
 
@@ -149,16 +176,51 @@ fn run_shell() -> Result<(), io::Error> {
 
                 // Bring the terminal into the cooked mode before executing the command
                 terminal::disable_raw_mode()?;
-                if execute_command(&mut input_line)? {
+                // update command history
+                history_push(&mut history, &input_line);
+                let should_exit = execute_command(&mut input_line)?;
+                if should_exit {
                     return Ok(());
                 }
                 break; // break out from the key-parsing loop (to go to the next command prompt)
             } else if event == Event::Key(KeyCode::Up.into()) {
-                print!("Up pressed\r");
-                // Enter History Mode / Move history_ptr up
+                if history.len() == 0 {
+                    continue;
+                }
+                // No-op: Oldest history entry reached
+                if history_ptr_pos == 0 {
+                    continue;
+                }
+                // Enter the History Mode
+                if shell_mode == ShellMode::Draft {
+                    draft_line = input_line.clone();
+                    shell_mode = ShellMode::History;
+                }
+                // Move up the history
+                input_line = history[history_ptr_pos - 1].clone();
+                history_ptr_pos -= 1;
+                redraw(&prompt, &input_line)?;
             } else if event == Event::Key(KeyCode::Down.into()) {
-                print!("Down pressed\r");
-                // Enter Draft Mode / Mode history_ptr down
+                if history.len() == 0 {
+                    continue;
+                }
+                // No-op: Already in draft mode
+                if shell_mode == ShellMode::Draft {
+                    continue;
+                }
+                // newest history entry reached => move to draft_line
+                else if history_ptr_pos == history.len() - 1 {
+                    input_line = draft_line.clone();
+                    draft_line = String::from("");
+                    history_ptr_pos += 1;
+                    shell_mode = ShellMode::Draft;
+                }
+                // Move down the history
+                else if history_ptr_pos < history.len() - 1 {
+                    input_line = history[history_ptr_pos + 1].clone();
+                    history_ptr_pos += 1;
+                }
+                redraw(&prompt, &input_line)?;
             } else if event == Event::Key(KeyCode::Esc.into()) {
                 // Exit the shell
                 return Ok(());
