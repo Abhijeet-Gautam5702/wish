@@ -65,8 +65,10 @@ Not: `read_line` and only act after Enter.
 
 | Input | Action |
 |-------|--------|
-| Printable `Char(c)` (`!c.is_control()`) | Append to `input_line`, redraw |
-| Control / unknown keys / mouse | No-op |
+| Printable `Char(c)` without Ctrl (`!c.is_control()`) | Append to `input_line`, redraw |
+| Ctrl+C | Cancel line → new prompt (`break` key loop) |
+| Ctrl+D (empty line) | Exit shell |
+| Ctrl+D (non-empty) / other Ctrl+key | No-op |
 | Backspace | Pop last char if any, redraw |
 | Enter | Submit (see below) |
 | Esc | Exit shell |

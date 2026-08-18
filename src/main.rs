@@ -1,6 +1,6 @@
 use crossterm::{
     cursor,
-    event::{Event, KeyCode, KeyEvent, read},
+    event::{Event, KeyCode, KeyEvent, KeyModifiers, read},
     execute,
     terminal::{self, Clear},
 };
@@ -266,11 +266,25 @@ fn run_shell() -> Result<(), io::Error> {
                 // Check if the keystroke is a printable character
                 // append to input_line if it is
                 Event::Key(KeyEvent {
-                    code: KeyCode::Char(c),
+                    code: KeyCode::Char(ch),
+                    modifiers,
                     ..
                 }) => {
-                    if !c.is_control() {
-                        input_line.push(c);
+                    // all key combinations where at least one keystroke is Ctrl
+                    // e.g., Ctrl+Shift+C, Ctrl+D, Ctrl+Alt+C, etc.
+                    if modifiers.contains(KeyModifiers::CONTROL) {
+                        // exit current prompt & move to the next command prompt
+                        if ch.eq_ignore_ascii_case(&'c') {
+                            break;
+                        }
+                        // exit the shell if no input
+                        else if ch.eq_ignore_ascii_case(&'d') && input_line.is_empty() {
+                            return Ok(());
+                        }
+                    }
+                    // printable character found => update input_line
+                    else if !ch.is_control() {
+                        input_line.push(ch);
                         redraw(&prompt, &input_line)?;
                     }
                 }

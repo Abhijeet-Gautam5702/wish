@@ -8,6 +8,7 @@ Educational shell written in Rust.
 - External commands and pipelines (`cmd1 | cmd2 | ...`)
 - Builtins: `cd`, `exit`
 - Raw-mode line editor (crossterm): printable chars, Backspace, Enter, Esc
+- Ctrl-C (cancel line → new prompt) and Ctrl-D on empty line (exit)
 - Full-line redraw (`prompt` + `input_line`)
 - In-session command history (cap, skip duplicate last)
 - Up / Down history browse with draft save/restore
@@ -17,11 +18,10 @@ Educational shell written in Rust.
 
 Priority order for upcoming work:
 
-1. **Ctrl-C / Ctrl-D** — clear line / new prompt; EOF on empty line exits
-2. **Left / Right editing** — move cursor; insert and backspace in the middle
-3. **Redirection** — `>`, `>>`, `<` for stage stdin/stdout
-4. **Exit status** — use last pipeline stage status; optional `$?`
-5. **Path tab-completion** — complete files/dirs (starting simple)
+1. **Left / Right editing** — move cursor; insert and backspace in the middle
+2. **Redirection** — `>`, `>>`, `<` for stage stdin/stdout
+3. **Exit status** — use last pipeline stage status; optional `$?`
+4. **Path tab-completion** — complete files/dirs (starting simple)
 
 ## Docs
 
