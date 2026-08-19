@@ -5,7 +5,7 @@ use crossterm::{
     terminal::{self, Clear},
 };
 use std::{
-    env, eprintln, format,
+    cmp, env, eprintln, format,
     io::{self, Error, Write, stdout},
     path::Path,
     process::{Child, ChildStdout, Command, Stdio},
@@ -38,8 +38,9 @@ impl Drop for TerminalRawMode {
     }
 }
 
-/// Repaint the current prompt line as `prompt` + `input_line` (cursor at end).
-fn redraw(prompt: &str, input_line: &str) -> Result<(), io::Error> {
+/// Repaint the current prompt line as `prompt` + `input_line`
+/// at a given cursor position
+fn redraw(prompt: &str, input_line: &str, cursor_pos: usize) -> Result<(), io::Error> {
     let mut stdout = stdout();
     execute!(
         stdout,
@@ -48,6 +49,8 @@ fn redraw(prompt: &str, input_line: &str) -> Result<(), io::Error> {
     )?;
     write!(stdout, "{}{}", prompt, input_line)?;
     stdout.flush()?;
+    let effective_cursor_pos = prompt.len() + cursor_pos;
+    execute!(stdout, cursor::MoveToColumn(effective_cursor_pos as u16))?; // move the cursor to the desired position
     Ok(())
 }
 
@@ -172,10 +175,11 @@ fn run_shell() -> Result<(), io::Error> {
         let mut input_line: String = String::from("");
         let mut draft_line: String = String::from("");
         let mut history_ptr_pos: usize = history.len();
+        let mut cursor_pos: usize = 0;
 
         let mut shell_mode: ShellMode = ShellMode::Draft;
 
-        redraw(&prompt, &input_line)?;
+        redraw(&prompt, &input_line, cursor_pos)?;
 
         // Key-parsing loop (Reads keystrokes)
         loop {
@@ -184,8 +188,11 @@ fn run_shell() -> Result<(), io::Error> {
                     code: KeyCode::Backspace,
                     ..
                 }) => {
-                    input_line.pop();
-                    redraw(&prompt, &input_line)?;
+                    if cursor_pos > 0 {
+                        cursor_pos -= 1;
+                        input_line.remove(cursor_pos);
+                        redraw(&prompt, &input_line, cursor_pos)?;
+                    }
                 }
                 Event::Key(KeyEvent {
                     code: KeyCode::Enter,
@@ -230,7 +237,8 @@ fn run_shell() -> Result<(), io::Error> {
                     // Move up the history
                     input_line = history[history_ptr_pos - 1].clone();
                     history_ptr_pos -= 1;
-                    redraw(&prompt, &input_line)?;
+                    cursor_pos = input_line.len();
+                    redraw(&prompt, &input_line, cursor_pos)?;
                 }
                 Event::Key(KeyEvent {
                     code: KeyCode::Down,
@@ -255,7 +263,26 @@ fn run_shell() -> Result<(), io::Error> {
                         input_line = history[history_ptr_pos + 1].clone();
                         history_ptr_pos += 1;
                     }
-                    redraw(&prompt, &input_line)?;
+                    cursor_pos = input_line.len();
+                    redraw(&prompt, &input_line, cursor_pos)?;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Left,
+                    ..
+                }) => {
+                    if cursor_pos > 0 {
+                        cursor_pos -= 1;
+                        redraw(&prompt, &input_line, cursor_pos)?;
+                    }
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Right,
+                    ..
+                }) => {
+                    if cursor_pos < input_line.len() {
+                        cursor_pos += 1;
+                        redraw(&prompt, &input_line, cursor_pos)?;
+                    }
                 }
                 Event::Key(KeyEvent {
                     code: KeyCode::Esc, ..
@@ -284,8 +311,9 @@ fn run_shell() -> Result<(), io::Error> {
                     }
                     // printable character found => update input_line
                     else if !ch.is_control() {
-                        input_line.push(ch);
-                        redraw(&prompt, &input_line)?;
+                        input_line.insert(cursor_pos, ch);
+                        cursor_pos += 1;
+                        redraw(&prompt, &input_line, cursor_pos)?;
                     }
                 }
                 // Mouse events, Other keys, etc.

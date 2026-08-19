@@ -1,6 +1,6 @@
 # Interactive line editing
 
-How Wish reads a command line before execute. Cursor is currently always at the **end** of the line (Left/Right is planned later).
+How Wish reads a command line before execute. A `cursor_pos` tracks the caret; Left/Right move it (ASCII / byte-oriented for now).
 
 ## Overview
 
@@ -65,15 +65,15 @@ Not: `read_line` and only act after Enter.
 
 | Input | Action |
 |-------|--------|
-| Printable `Char(c)` without Ctrl (`!c.is_control()`) | Append to `input_line`, redraw |
+| Printable `Char(c)` without Ctrl (`!c.is_control()`) | Insert at `cursor_pos`, advance cursor, redraw |
 | Ctrl+C | Cancel line → new prompt (`break` key loop) |
 | Ctrl+D (empty line) | Exit shell |
 | Ctrl+D (non-empty) / other Ctrl+key | No-op |
-| Backspace | Pop last char if any, redraw |
+| Backspace | Delete character before cursor (if any), redraw |
+| Left / Right | Move `cursor_pos` within `[0, len]`; no-op at ends |
 | Enter | Submit (see below) |
 | Esc | Exit shell |
-| Up / Down | History (see [Command history](command-history.md)) |
-| Left / Right | Not implemented yet |
+| Up / Down | History (see [Command history](command-history.md)); cursor jumps to end of loaded line |
 
 ## Backspace
 
@@ -101,13 +101,14 @@ Not: `read_line` and only act after Enter.
 
 ## Redraw
 
-Repaint the current row as `prompt + input_line`.
+Repaint the current row as `prompt + input_line`, then place the caret.
 
 | Case | Action |
 |------|--------|
-| After Char / Backspace / history load | Redraw |
+| After Char / Backspace / Left / Right / history load | Redraw |
 | Line got shorter | Clear to end of line so old characters do not linger |
 | Empty buffer | Show prompt only |
-| Cursor | End of line (for now) |
+| Caret | Column ≈ `prompt.len() + cursor_pos` (ASCII / byte-oriented) |
+| After Up/Down | `cursor_pos = input_line.len()` (end of line) |
 
-Typical approach: move to column 0 → clear until end of line → write prompt + buffer → flush.
+Typical approach: move to column 0 → clear until end of line → write prompt + buffer → `MoveToColumn` → flush.
