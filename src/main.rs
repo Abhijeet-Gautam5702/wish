@@ -6,9 +6,10 @@ use crossterm::{
 };
 use std::{
     cmp, env, eprintln, format,
-    io::{self, Error, Write, stdout},
+    fs::File,
+    io::{self, Error, Write, stdin, stdout},
     path::Path,
-    process::{Child, ChildStdout, Command, Stdio},
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     write,
 };
 
@@ -54,6 +55,39 @@ fn redraw(prompt: &str, input_line: &str, cursor_pos: usize) -> Result<(), io::E
     Ok(())
 }
 
+fn configure_handles<'a>(
+    stage: &'a str,
+    prev_stdout: &mut Option<ChildStdout>,
+) -> Result<(&'a str, Stdio), io::Error> {
+    // Split the stage using '<' to find the actual command and the STDIN filename
+    // LHS = actual command => Split it using whitespace and continue with the regular flow
+    // RHS = STDIN filename => Check for the file existence and
+    //                                  - stop executing if file is not present
+    //                                  - set the STDIN of this command to the file
+
+    let mut stdin = prev_stdout
+        .take() // Take the value out of Option<T>
+        // Assign shell's file-descriptor if this is first stage
+        // otherwise create a new handle from the previous_stdout.take()
+        .map_or(Stdio::inherit(), Stdio::from);
+    let parts: Vec<&str> = stage.split(" < ").collect();
+    if parts.len() > 2 {
+        return Err(Error::new(
+            io::ErrorKind::InvalidInput,
+            "Multiple '<' found in the stage",
+        ));
+    }
+
+    let command_string = parts[0];
+    if parts.len() == 1 {
+        return Ok((command_string, stdin));
+    }
+    let filename = parts[1];
+    let filepath = Path::new(filename);
+    stdin = Stdio::from(File::open(filepath)?);
+    Ok((command_string, stdin))
+}
+
 /// Run a line: builtins (`cd`, `exit`) or an external pipeline (`cmd | cmd | ...`).
 /// Returns `Ok(true)` if the shell should exit, `Ok(false)` to keep prompting.
 fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
@@ -62,7 +96,8 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
     let mut child_processes: Vec<Child> = vec![];
 
     while let Some(stage) = pipeline_stages.next() {
-        let mut fragments_iterator = stage.trim().split_whitespace();
+        let (command_string, stdin) = configure_handles(stage, &mut previous_stdout)?;
+        let mut fragments_iterator = command_string.trim().split_whitespace();
         let command = fragments_iterator.next().unwrap();
         let arguments = fragments_iterator; // iterator of &str
 
@@ -87,11 +122,11 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
             }
             _ => {
                 // Configure STDIN/STDOUT handles
-                let stdin = previous_stdout
-                    .take() // Take the value out of Option<T>
-                    // Assign shell's file-descriptor if this is first stage
-                    // otherwise create a new handle from the previous_stdout.take()
-                    .map_or_else(Stdio::inherit, Stdio::from);
+                // let stdin = previous_stdout
+                //     .take() // Take the value out of Option<T>
+                //     // Assign shell's file-descriptor if this is first stage
+                //     // otherwise create a new handle from the previous_stdout.take()
+                //     .map_or_else(Stdio::inherit, Stdio::from);
                 let stdout = if pipeline_stages.peek().is_some() {
                     // If this is a middle-stage (there is a stage after this)
                     // current child's stdout will be an OS pipe
