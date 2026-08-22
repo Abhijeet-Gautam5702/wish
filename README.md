@@ -15,11 +15,21 @@ Not a bash clone. A clear, readable educational project you can run, read, and e
 
 ## Quick start
 
+Needs a recent Rust toolchain (`rustc` + `cargo`):
+
+```bash
+# OPTIONAL: Skip this if you already have Rust toolchain installed
+# macOS / Linux — see https://rustup.rs for other options
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Then from this repo:
+
 ```bash
 cargo run
 ```
 
-Then try:
+Try:
 
 ```bash
 ls | wc -l
