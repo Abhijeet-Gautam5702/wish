@@ -9,6 +9,7 @@ use std::{
     fs::OpenOptions,
     io::{self, Error, Write, stdout},
     path::Path,
+    println,
     process::{Child, ChildStdout, Command, Stdio},
     write,
 };
@@ -177,12 +178,17 @@ fn configure_handles<'a>(
 }
 
 /// Run a line: builtins (`cd`, `exit`) or an external pipeline (`cmd | cmd | ...`).
+/// Updates `shell_prev_exit_status` with this line's status (last pipeline stage).
 /// Returns `Ok(true)` if the shell should exit, `Ok(false)` to keep prompting.
-fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
+fn execute_command(
+    command_string: &mut String,
+    shell_prev_exit_status: &mut i32,
+) -> Result<bool, io::Error> {
     let mut pipeline_stages = command_string.split(" | ").map(|x| x.trim()).peekable();
     let mut previous_stdout: Option<ChildStdout> = None;
     let mut child_processes: Vec<Child> = vec![];
     let mut stage_index: u32 = 0;
+    let mut pipeline_exit_status: i32 = 0; // Pipeline exit status = exit status of the last stage
 
     while let Some(stage) = pipeline_stages.next() {
         let is_next_stage_present = pipeline_stages.peek().is_some();
@@ -197,7 +203,10 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
         let arguments = fragments_iterator; // iterator of &str
 
         match command {
-            // Shell built-ins
+            "$?" => {
+                println!("{}", *shell_prev_exit_status);
+                pipeline_exit_status = 0;
+            }
             "cd" => {
                 // .peek() adds an extra reference
                 // arguments is already an iterator of &str
@@ -213,6 +222,7 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
             }
             // Exit the shell program completely
             "exit" => {
+                *shell_prev_exit_status = 0;
                 return Ok(true);
             }
             _ => {
@@ -252,13 +262,17 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
     // Pipeline completion === Each stage in the pipeline completes
     for child in &mut child_processes {
         match child.wait() {
-            Ok(_exit_status) => {}
+            Ok(exit_status) => {
+                pipeline_exit_status = exit_status.code().unwrap_or(1);
+            }
             Err(wait_err) => {
                 let error_msg = format!("Failed to wait for the child: {}", wait_err);
                 return Err(Error::new(io::ErrorKind::Other, error_msg));
             }
         }
     }
+    // Set the Shell's global exit status to the current pipeline's exit status
+    *shell_prev_exit_status = pipeline_exit_status;
     Ok(false)
 }
 
@@ -281,6 +295,7 @@ fn history_push(history: &mut Vec<String>, input_line: &String) {
 
 fn run_shell() -> Result<(), io::Error> {
     let mut history: Vec<String> = vec![];
+    let mut shell_exit_status: i32 = 0;
     // Outer Shell Running Loop
     loop {
         let _raw_mode = TerminalRawMode::enter()?;
@@ -329,7 +344,7 @@ fn run_shell() -> Result<(), io::Error> {
                     drop(_raw_mode);
                     // update command history
                     history_push(&mut history, &input_line);
-                    let should_exit = execute_command(&mut input_line)?;
+                    let should_exit = execute_command(&mut input_line, &mut shell_exit_status)?;
                     if should_exit {
                         return Ok(());
                     }

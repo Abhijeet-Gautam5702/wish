@@ -16,13 +16,13 @@ Educational shell written in Rust.
 - `TerminalRawMode` RAII guard (raw while typing; cooked on drop / before execute)
 - Redirection — `<` (stdin), `>` (truncate stdout), `>>` (append stdout); open-fail aborts
 - After a stage redirects stdout to a file, the next pipeline stage gets EOF stdin (`Stdio::null`), not the terminal
+- Exit status — last pipeline stage’s code kept in shell state; `$?` builtin prints it (teaching shortcut, not full `$` expansion)
 
 ## Next Up
 
 Priority order for upcoming work:
 
-1. **Exit status** — use last pipeline stage status; optional `$?`
-2. **Path tab-completion** — complete files/dirs (starting simple)
+1. **Path tab-completion** — complete files/dirs (starting simple)
 
 ## Docs
 
