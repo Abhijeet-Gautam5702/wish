@@ -5,11 +5,11 @@ use crossterm::{
     terminal::{self, Clear},
 };
 use std::{
-    cmp, env, eprintln, format,
-    fs::File,
-    io::{self, Error, Write, stdin, stdout},
+    env, eprintln, format,
+    fs::OpenOptions,
+    io::{self, Error, Write, stdout},
     path::Path,
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    process::{Child, ChildStdout, Command, Stdio},
     write,
 };
 
@@ -57,35 +57,123 @@ fn redraw(prompt: &str, input_line: &str, cursor_pos: usize) -> Result<(), io::E
 
 fn configure_handles<'a>(
     stage: &'a str,
+    stage_index: u32,
     prev_stdout: &mut Option<ChildStdout>,
-) -> Result<(&'a str, Stdio), io::Error> {
-    // Split the stage using '<' to find the actual command and the STDIN filename
-    // LHS = actual command => Split it using whitespace and continue with the regular flow
-    // RHS = STDIN filename => Check for the file existence and
-    //                                  - stop executing if file is not present
-    //                                  - set the STDIN of this command to the file
+    is_next_stage_present: bool,
+) -> Result<(&'a str, (Stdio, Stdio)), io::Error> {
+    // EOF STDIN Handle
+    /*
+     * previous_stdout = None for two cases
+     * 1) 1st stage of the pipeline => We inherit the STDIN of the shell
+     * 2) previous stage redirected its output to a file => We set STDIN handle to EOF (null device / immediate EOF)
+     *
+     * So if stage_index == 0 => 1st stage of the pipeline
+     */
+    let mut stdin = if prev_stdout.is_none() && stage_index > 0 {
+        Stdio::null()
+    }
+    // Assign STDIN handle in priority:
+    // File (via redirect) > Previous Pipe's STDOUT > Shell inherited-stdin
+    else {
+        prev_stdout.take().map_or(Stdio::inherit(), Stdio::from)
+    };
 
-    let mut stdin = prev_stdout
-        .take() // Take the value out of Option<T>
-        // Assign shell's file-descriptor if this is first stage
-        // otherwise create a new handle from the previous_stdout.take()
-        .map_or(Stdio::inherit(), Stdio::from);
-    let parts: Vec<&str> = stage.split(" < ").collect();
-    if parts.len() > 2 {
-        return Err(Error::new(
-            io::ErrorKind::InvalidInput,
-            "Multiple '<' found in the stage",
-        ));
+    // Assign STDOUT handle in priority:
+    // File (via redirect) > Pipe (if next stage exists) or Shell inherited-stdout
+    let mut stdout = if is_next_stage_present {
+        Stdio::piped()
+    } else {
+        Stdio::inherit()
+    };
+
+    let append_redirect_present = stage.contains(">>");
+    if append_redirect_present {
+        let parts: Vec<&str> = stage.split(">>").collect();
+        if parts.len() > 2 {
+            return Err(Error::new(
+                io::ErrorKind::InvalidInput,
+                "Multiple '>>' not supported",
+            ));
+        }
+
+        let command_string = parts[0].trim();
+        let filename = parts[1].trim();
+        if filename.is_empty() {
+            return Err(Error::new(
+                io::ErrorKind::InvalidFilename,
+                "filename absent after '>>' redirection",
+            ));
+        }
+        let filepath = Path::new(filename);
+        let file = OpenOptions::new()
+            .create(true) // create a file if not already present
+            .append(true) // append contents at the end of the file
+            .open(filepath)?;
+        stdout = Stdio::from(file);
+        return Ok((command_string, (stdin, stdout)));
     }
 
-    let command_string = parts[0];
-    if parts.len() == 1 {
-        return Ok((command_string, stdin));
+    let truncate_redirect_present = stage.contains(">");
+    if truncate_redirect_present {
+        let parts: Vec<&str> = stage.split(">").collect();
+        if parts.len() > 2 {
+            return Err(Error::new(
+                io::ErrorKind::InvalidInput,
+                "Multiple '>' not supported",
+            ));
+        }
+
+        let command_string = parts[0].trim();
+        let filename = parts[1].trim();
+        if filename.is_empty() {
+            return Err(Error::new(
+                io::ErrorKind::InvalidFilename,
+                "filename absent after '>' redirection",
+            ));
+        }
+        let filepath = Path::new(filename);
+        // Difference between .truncate(true) and .write(true)
+        /*
+         * .write() replaces the content with the new content
+         * but if new content is shorter than the existing content
+         * the leftover bytes will remain in the file
+         *
+         * .truncate() ensures the file is completely cleared
+         */
+        let file = OpenOptions::new()
+            .create(true) // create a file if not already present
+            .write(true) // write contents in the file
+            .truncate(true) // truncate any previous contents in the file
+            .open(filepath)?;
+        stdout = Stdio::from(file);
+        return Ok((command_string, (stdin, stdout)));
     }
-    let filename = parts[1];
-    let filepath = Path::new(filename);
-    stdin = Stdio::from(File::open(filepath)?);
-    Ok((command_string, stdin))
+
+    let input_redirect_present = stage.contains("<");
+    if input_redirect_present {
+        let parts: Vec<&str> = stage.split("<").collect();
+        if parts.len() > 2 {
+            return Err(Error::new(
+                io::ErrorKind::InvalidInput,
+                "Multiple '<' not supported",
+            ));
+        }
+
+        let command_string = parts[0].trim();
+        let filename = parts[1].trim();
+        if filename.is_empty() {
+            return Err(Error::new(
+                io::ErrorKind::InvalidFilename,
+                "filename absent after '<' redirection",
+            ));
+        }
+        let filepath = Path::new(filename);
+        let file = OpenOptions::new().read(true).open(filepath)?; // open a file in read-only mode
+        stdin = Stdio::from(file);
+        return Ok((command_string, (stdin, stdout)));
+    }
+
+    Ok((stage, (stdin, stdout)))
 }
 
 /// Run a line: builtins (`cd`, `exit`) or an external pipeline (`cmd | cmd | ...`).
@@ -94,9 +182,16 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
     let mut pipeline_stages = command_string.split(" | ").map(|x| x.trim()).peekable();
     let mut previous_stdout: Option<ChildStdout> = None;
     let mut child_processes: Vec<Child> = vec![];
+    let mut stage_index: u32 = 0;
 
     while let Some(stage) = pipeline_stages.next() {
-        let (command_string, stdin) = configure_handles(stage, &mut previous_stdout)?;
+        let is_next_stage_present = pipeline_stages.peek().is_some();
+        let (command_string, (stdin, stdout)) = configure_handles(
+            stage,
+            stage_index,
+            &mut previous_stdout,
+            is_next_stage_present,
+        )?;
         let mut fragments_iterator = command_string.trim().split_whitespace();
         let command = fragments_iterator.next().unwrap();
         let arguments = fragments_iterator; // iterator of &str
@@ -121,22 +216,6 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
                 return Ok(true);
             }
             _ => {
-                // Configure STDIN/STDOUT handles
-                // let stdin = previous_stdout
-                //     .take() // Take the value out of Option<T>
-                //     // Assign shell's file-descriptor if this is first stage
-                //     // otherwise create a new handle from the previous_stdout.take()
-                //     .map_or_else(Stdio::inherit, Stdio::from);
-                let stdout = if pipeline_stages.peek().is_some() {
-                    // If this is a middle-stage (there is a stage after this)
-                    // current child's stdout will be an OS pipe
-                    Stdio::piped()
-                } else {
-                    // If this is the last stage (no further command after this)
-                    // current child's stdout will be the shell's stdout (terminal)
-                    Stdio::inherit()
-                };
-
                 // Creates a command configuration
                 // adds arguments to it
                 // asks the OS to create (spawn) and start the child process
@@ -165,6 +244,8 @@ fn execute_command(command_string: &mut String) -> Result<bool, io::Error> {
                 }
             }
         }
+
+        stage_index += 1;
     }
 
     // Wait for the pipeline to complete

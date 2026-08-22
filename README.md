@@ -14,25 +14,15 @@ Educational shell written in Rust.
 - In-session command history (cap, skip duplicate last)
 - Up / Down history browse with draft save/restore
 - `TerminalRawMode` RAII guard (raw while typing; cooked on drop / before execute)
-- Input redirection — `command < file` (stage stdin from file; open-fail aborts)
+- Redirection — `<` (stdin), `>` (truncate stdout), `>>` (append stdout); open-fail aborts
+- After a stage redirects stdout to a file, the next pipeline stage gets EOF stdin (`Stdio::null`), not the terminal
 
 ## Next Up
 
 Priority order for upcoming work:
 
-1. **Redirection (stdout)** — `>` and `>>` for stage stdout
-2. **Exit status** — use last pipeline stage status; optional `$?`
-3. **Path tab-completion** — complete files/dirs (starting simple)
-
-### Optional (redirection stretch)
-
-Extras if you stay on I/O instead of moving to exit status / tab-complete:
-
-- **`2>` / `2>>`** — redirect stderr (highest-value stretch after the basics)
-- **`2>&1` / `&>`** — merge stderr into stdout, or redirect both
-- **`<<`** — here-docs (multi-line stdin from the input)
-- **`<<<`** — here-strings (bash-style)
-- **`n>` / `n<`** — arbitrary file-descriptor numbers
+1. **Exit status** — use last pipeline stage status; optional `$?`
+2. **Path tab-completion** — complete files/dirs (starting simple)
 
 ## Docs
 
