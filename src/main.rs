@@ -56,20 +56,19 @@ fn redraw(prompt: &str, input_line: &str, cursor_pos: usize) -> Result<(), io::E
     Ok(())
 }
 
+/// Parse one pipeline stage’s redirections and choose stdin/stdout `Stdio`.
+///
+/// Returns `(command_text, (stdin, stdout))` where `command_text` is borrowed from `stage`.
+/// Handles at most one of `>>`, `>`, or `<` per stage (`>>` checked before `>`).
 fn configure_handles<'a>(
     stage: &'a str,
     stage_index: u32,
     prev_stdout: &mut Option<ChildStdout>,
     is_next_stage_present: bool,
 ) -> Result<(&'a str, (Stdio, Stdio)), io::Error> {
-    // EOF STDIN Handle
-    /*
-     * previous_stdout = None for two cases
-     * 1) 1st stage of the pipeline => We inherit the STDIN of the shell
-     * 2) previous stage redirected its output to a file => We set STDIN handle to EOF (null device / immediate EOF)
-     *
-     * So if stage_index == 0 => 1st stage of the pipeline
-     */
+    // previous_stdout is None in two cases:
+    // 1) first stage (stage_index == 0) => inherit the shell's stdin
+    // 2) later stage after a file stdout redirect (no pipe) => Stdio::null() (immediate EOF)
     let mut stdin = if prev_stdout.is_none() && stage_index > 0 {
         Stdio::null()
     }
@@ -133,18 +132,12 @@ fn configure_handles<'a>(
             ));
         }
         let filepath = Path::new(filename);
-        // Difference between .truncate(true) and .write(true)
-        /*
-         * .write() replaces the content with the new content
-         * but if new content is shorter than the existing content
-         * the leftover bytes will remain in the file
-         *
-         * .truncate() ensures the file is completely cleared
-         */
+        // .write(true) allows writing; without .truncate(true), a shorter write can
+        // leave leftover bytes from the old file. Together they match shell `>`.
         let file = OpenOptions::new()
             .create(true) // create a file if not already present
-            .write(true) // write contents in the file
-            .truncate(true) // truncate any previous contents in the file
+            .write(true) // allow writing
+            .truncate(true) // clear existing contents on open
             .open(filepath)?;
         stdout = Stdio::from(file);
         return Ok((command_string, (stdin, stdout)));
@@ -177,7 +170,8 @@ fn configure_handles<'a>(
     Ok((stage, (stdin, stdout)))
 }
 
-/// Run a line: builtins (`cd`, `exit`) or an external pipeline (`cmd | cmd | ...`).
+/// Run a line: builtins (`cd`, `exit`, `$?`) or an external pipeline (`cmd | cmd | ...`).
+///
 /// Updates `shell_prev_exit_status` with this line's status (last pipeline stage).
 /// Returns `Ok(true)` if the shell should exit, `Ok(false)` to keep prompting.
 fn execute_command(
@@ -203,6 +197,7 @@ fn execute_command(
         let arguments = fragments_iterator; // iterator of &str
 
         match command {
+            // Simple shortcut: print previous line's status (not full `$` expansion)
             "$?" => {
                 println!("{}", *shell_prev_exit_status);
                 pipeline_exit_status = 0;

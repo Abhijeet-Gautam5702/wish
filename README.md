@@ -1,40 +1,66 @@
-# Wish
+# 🐚 Wish
 
-Educational shell written in Rust.
+A small Unix-like shell in **Rust** — built to learn how real shells work: processes, pipes, redirections, and an interactive line editor.
 
-## Done
+Not a bash clone. A clear, readable educational project you can run, read, and extend.
 
-- Prompt with current working directory
-- External commands and pipelines (`cmd1 | cmd2 | ...`)
-- Builtins: `cd`, `exit`
-- Raw-mode line editor (crossterm): printable chars, Backspace, Enter, Esc
-- Left / Right cursor; insert and backspace in the middle of the line
-- Ctrl-C (cancel line → new prompt) and Ctrl-D on empty line (exit)
-- Full-line redraw (`prompt` + `input_line`) with cursor placement
-- In-session command history (cap, skip duplicate last)
-- Up / Down history browse with draft save/restore
-- `TerminalRawMode` RAII guard (raw while typing; cooked on drop / before execute)
-- Redirection — `<` (stdin), `>` (truncate stdout), `>>` (append stdout); open-fail aborts
-- After a stage redirects stdout to a file, the next pipeline stage gets EOF stdin (`Stdio::null`), not the terminal
-- Exit status — last pipeline stage’s code kept in shell state; `$?` builtin prints it (teaching shortcut, not full `$` expansion)
+## Features
 
-## Next Up
+- **Pipelines** — `cmd1 | cmd2 | …` with proper stdin/stdout wiring
+- **Redirection** — `<`, `>`, `>>` (file beats pipe; next stage gets EOF when stdout went to a file)
+- **Interactive editing** — raw-mode prompt (crossterm), cursor Left/Right, Ctrl-C / Ctrl-D
+- **History** — in-session Up/Down with draft save/restore
+- **Builtins** — `cd`, `exit`, and `$?` for the last pipeline exit status
+- **CWD prompt** — always know where you are
 
-Priority order for upcoming work:
+## Quick start
 
-1. **Path tab-completion** — complete files/dirs (starting simple)
+```bash
+cargo run
+```
 
-## Docs
+Then try:
 
-| Doc | Contents |
-|-----|----------|
-| [Interactive line editing](docs/interactive-line-editing.md) | Raw/cooked mode, key loop, Char/Backspace/Enter, redraw |
-| [Command history](docs/command-history.md) | History store, Draft/History mode, Up/Down, push rules |
+```bash
+ls | wc -l
+echo hello > out.txt
+cat < out.txt
+false
+$?
+```
 
-## Later / non-goals (for now)
+## Caveats
 
-- Persistent history file
-- Ctrl-R reverse search
+Wish is intentionally simple. Known gaps vs a real shell:
+
+- **Parsing** — stages split on ` | `; no quoting, escapes, or globs (`"a b"`, `*.rs` won’t work as in bash)
+- **One redirect per stage** — e.g. `cmd < in > out` is not supported yet; use a single `<`, `>`, or `>>`
+- **`$?`** — teaching builtin (type `$?` alone), not parameter expansion — `echo $?` does **not** expand
+- **Exit status** — pipeline status is the **last** stage only (no `pipefail`); `cd`/spawn failures aren’t always reflected in `$?`
+- **Builtins in pipelines** — e.g. `… | cd` doesn’t consume the pipe the way a child process would
+- **No stderr redirects** — no `2>`, `2>&1`, here-docs, etc.
+- **Line editor** — ASCII/byte-oriented cursor; history is in-session only
+- **No jobs / advanced signals** — no `&`, job control, or full signal handling beyond editor Ctrl-C/D
+
+## Design notes
+
+Deeper write-ups live in [`docs/`](docs/):
+
+- [Interactive line editing](docs/interactive-line-editing.md)
+- [Command history](docs/command-history.md)
+- [Execution](docs/execution.md) — pipelines, redirection, exit status / `$?`
+
+Feature checklist: [`TODO.md`](TODO.md).
+
+## Later goals
+
+- Path tab-completion
+- Persistent history / Ctrl-R
 - Multi-line input
+- Quoting & env expansion
+- Background jobs
 - Syntax highlighting
-- Background jobs, quoting, env expansion (until explicitly planned)
+
+## License
+
+Use and learn freely — this is an educational prototype.

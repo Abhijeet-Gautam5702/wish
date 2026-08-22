@@ -1,13 +1,10 @@
 # Interactive line editing
 
-How Wish reads a command line before execute. A `cursor_pos` tracks the caret; Left/Right move it (ASCII / byte-oriented for now).
+How Wish collects a command line before execution.
 
-## Overview
+The prompt runs in **raw mode** so each keystroke is handled immediately. A `cursor_pos` marks the caret (ASCII / byte-oriented). Insert and Backspace act at the caret, not only at the end of the line.
 
-1. Enter raw mode for the prompt (`TerminalRawMode` guard).
-2. Show `prompt` + `input_line` (CWD + ` $ `).
-3. Handle keys one at a time; redraw when the buffer changes.
-4. On Enter: leave raw (cooked), then run the line (see also [Command history](command-history.md)).
+Related: [Command history](command-history.md) · [Execution](execution.md)
 
 ## Flow
 
@@ -16,99 +13,66 @@ flowchart TD
   START([Shell start]) --> PROMPT
 
   PROMPT[Show prompt] --> RAW[Enable raw mode]
-  RAW --> RESET[Clear input_line / draft state]
+  RAW --> RESET[Clear line / draft state]
   RESET --> READ[Read key event]
 
   READ --> MATCH{Key?}
 
-  MATCH -->|Char printable| CHAR[Append + redraw]
-  MATCH -->|Backspace| BS[Pop + redraw]
+  MATCH -->|Printable char| CHAR[Insert at cursor + redraw]
+  MATCH -->|Backspace| BS[Delete before cursor + redraw]
+  MATCH -->|Left / Right| CUR[Move cursor + redraw]
   MATCH -->|Up / Down| HIST[History browse]
-  MATCH -->|Enter| ENTER[Submit path]
+  MATCH -->|Ctrl-C| CANCEL[Cancel → new prompt]
+  MATCH -->|Ctrl-D empty| EXITD([Exit shell])
+  MATCH -->|Enter| ENTER{Line empty?}
   MATCH -->|Esc| EXIT([Exit shell])
   MATCH -->|Other| NOOP[No-op]
   NOOP --> READ
 
   CHAR --> READ
   BS --> READ
+  CUR --> READ
   HIST --> READ
+  CANCEL --> PROMPT
 
-  ENTER --> COOKED[Cooked mode]
-  COOKED --> EXEC[Push history if any + execute]
+  ENTER -->|yes| PROMPT
+  ENTER -->|no| COOKED[Leave raw / cooked mode]
+  COOKED --> EXEC[History push + execute]
   EXEC --> EXITCHK{exit?}
   EXITCHK -->|yes| DONE([Exit])
   EXITCHK -->|no| PROMPT
 ```
 
-History Up/Down details: [Command history](command-history.md).
+## Raw vs cooked
 
-## Terminal mode (raw / cooked)
+| Phase | Mode | Why |
+|-------|------|-----|
+| Editing the line | **Raw** | Keystrokes arrive one at a time; the shell draws the line itself |
+| Running a command | **Cooked** | Child processes expect normal terminal line discipline |
 
-| Case | Action |
-|------|--------|
-| Start of prompt | Enable raw via `TerminalRawMode` guard |
-| Guard drops | Disable raw (normal end of scope or panic unwind) |
-| Before execute | Terminal must be cooked so children behave |
-| `exit` / Esc | Leave shell; raw restored by drop / process end |
+Wish uses a RAII guard (`TerminalRawMode`): raw while the guard lives; cooked again when it drops — including before execute.
 
-**Rules**
+## Keys
 
-- Raw only while collecting the line.
-- Prefer a RAII guard over scattered enable/disable calls.
-- Manual cooked before execute is fine if the guard is still alive until end of the prompt iteration.
+| Input | Behavior |
+|-------|----------|
+| Printable character | Insert at caret, move caret right, redraw |
+| Backspace | Delete the character before the caret (no-op at column 0) |
+| Left / Right | Move caret within the line |
+| Up / Down | Browse history ([details](command-history.md)); caret jumps to end of the loaded line |
+| Ctrl-C | Discard the line → new prompt |
+| Ctrl-D (empty line) | Exit the shell |
+| Enter | Submit (below) |
+| Esc | Exit the shell |
 
-## Keystroke loop
+## Submit
 
-Per keystroke: `match` on `KeyEvent` → update `input_line` (and related state) → redraw when needed.
-
-Not: `read_line` and only act after Enter.
-
-| Input | Action |
-|-------|--------|
-| Printable `Char(c)` without Ctrl (`!c.is_control()`) | Insert at `cursor_pos`, advance cursor, redraw |
-| Ctrl+C | Cancel line → new prompt (`break` key loop) |
-| Ctrl+D (empty line) | Exit shell |
-| Ctrl+D (non-empty) / other Ctrl+key | No-op |
-| Backspace | Delete character before cursor (if any), redraw |
-| Left / Right | Move `cursor_pos` within `[0, len]`; no-op at ends |
-| Enter | Submit (see below) |
-| Esc | Exit shell |
-| Up / Down | History (see [Command history](command-history.md)); cursor jumps to end of loaded line |
-
-## Backspace
-
-| Case | Action |
-|------|--------|
-| Empty `input_line` | No-op (do not erase into the prompt) |
-| Non-empty | Pop one character, redraw |
-
-## Enter / submit
-
-```text
-1. Write \r\n (move to next screen line)
-2. If input_line empty (trim) → new prompt, no execute
-3. Cooked mode
-4. Push history if policy allows (see [Command history](command-history.md))
-5. execute_command(input_line)
-6. If exit builtin → leave shell; else next prompt
-```
-
-| Case | Action |
-|------|--------|
-| Empty line | No push, no execute, re-prompt |
-| Non-empty | History push (policy), then execute |
-| `exit` | Shell exits |
+1. Move to the next screen line (`\r\n`).
+2. Empty line (after trim) → new prompt, nothing runs.
+3. Leave raw mode.
+4. Push into history when policy allows.
+5. Execute the line; if the `exit` builtin ran, leave the shell; otherwise show a new prompt.
 
 ## Redraw
 
-Repaint the current row as `prompt + input_line`, then place the caret.
-
-| Case | Action |
-|------|--------|
-| After Char / Backspace / Left / Right / history load | Redraw |
-| Line got shorter | Clear to end of line so old characters do not linger |
-| Empty buffer | Show prompt only |
-| Caret | Column ≈ `prompt.len() + cursor_pos` (ASCII / byte-oriented) |
-| After Up/Down | `cursor_pos = input_line.len()` (end of line) |
-
-Typical approach: move to column 0 → clear until end of line → write prompt + buffer → `MoveToColumn` → flush.
+Each visible change repaints the current row as `prompt + input_line`, clears leftover characters to the end of the line, then places the caret at `prompt.len() + cursor_pos`.
